@@ -1,0 +1,79 @@
+name: Summer Windows Release Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Use CI-safe version target
+        shell: pwsh
+        run: |
+          Copy-Item -Force `
+            "$env:GITHUB_WORKSPACE\BedrockLauncher\Github.Directory.Build.targets" `
+            "$env:GITHUB_WORKSPACE\BedrockLauncher\Directory.Build.targets"
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore
+        run: dotnet restore BedrockLauncher.sln
+
+      - name: Build release
+        shell: pwsh
+        run: |
+          msbuild BedrockLauncher.sln `
+            /t:Rebuild `
+            /p:Configuration=Release `
+            /p:Platform="Any CPU" `
+            /p:Restore=false `
+            /verbosity:minimal
+
+      - name: Run pipeline tests
+        run: dotnet test tests/BedrockLauncher.Pipeline.Tests/BedrockLauncher.Pipeline.Tests.csproj --configuration Release --no-restore
+
+      - name: Stage launcher files
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "BedrockLauncher\bin\Release\net8.0-windows10.0.17763.0"
+          if (-not (Test-Path (Join-Path $output "BedrockLauncher.exe"))) {
+            throw "BedrockLauncher.exe was not found in the expected release output: $output"
+          }
+
+          $staging = Join-Path $env:GITHUB_WORKSPACE "artifact\BedrockLauncher-2026.10.19.270-Windows"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $output "*") $staging
+
+          @"
+          BedrockLauncher Windows build
+          Upstream: https://github.com/BedrockLauncher/BedrockLauncher
+          Tag: 2026.10.19.270
+          Commit: $env:GITHUB_SHA
+          Configuration: Release | Any CPU
+          Target framework: net8.0-windows10.0.17763.0
+          Built by: GitHub Actions windows-latest
+          "@ | Set-Content -Encoding UTF8 (Join-Path $staging "BUILD-INFO.txt")
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: BedrockLauncher-2026.10.19.270-Windows
+          path: artifact/BedrockLauncher-2026.10.19.270-Windows
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 7
