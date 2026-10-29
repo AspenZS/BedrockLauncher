@@ -28,6 +28,33 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Pin the build to .NET 8
+        shell: pwsh
+        run: |
+          $sdk = dotnet --list-sdks |
+            ForEach-Object { ($_ -split ' ')[0] } |
+            Where-Object { $_ -like '8.0.*' } |
+            Sort-Object { [version]$_ } -Descending |
+            Select-Object -First 1
+
+          if (-not $sdk) {
+            throw "No .NET 8 SDK is installed on the runner."
+          }
+
+          @{
+            sdk = @{
+              version = $sdk
+              rollForward = "latestPatch"
+            }
+          } | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 global.json
+
+          $selected = dotnet --version
+          if ($selected -notlike '8.0.*') {
+            throw "Expected a .NET 8 SDK, but dotnet selected $selected."
+          }
+
+          dotnet --list-runtimes
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
